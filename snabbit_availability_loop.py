@@ -18,6 +18,9 @@ from snabbit_api import (
     env_value,
     find_saved_address,
     load_token,
+    next_open_time,
+    parse_api_error,
+    seconds_until_open,
     summarize_availability,
     token_customer_id,
 )
@@ -76,7 +79,22 @@ def run() -> int:
             print_check(client.now_availability(payload), args.print_json)
         except SnabbitHTTPError as exc:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[{timestamp}] HTTP {exc.status}: {exc.body}", flush=True)
+            api_error = parse_api_error(exc.status, exc.body)
+            if api_error.is_closed:
+                if args.once:
+                    print(f"[{timestamp}] {api_error.display_message}", flush=True)
+                    return 0
+
+                opens_at = next_open_time()
+                sleep_seconds = seconds_until_open()
+                print(
+                    f"[{timestamp}] {api_error.display_message}; sleeping until {opens_at.strftime('%Y-%m-%d %H:%M')}",
+                    flush=True,
+                )
+                time.sleep(sleep_seconds)
+                continue
+
+            print(f"[{timestamp}] {api_error.display_message}", flush=True)
             if args.once:
                 return 1
         except Exception as exc:

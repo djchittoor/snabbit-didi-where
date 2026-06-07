@@ -5,7 +5,7 @@ import json
 import os
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from urllib import error, parse, request
 
@@ -13,6 +13,7 @@ from urllib import error, parse, request
 BASE_URL = "https://apis.maestroserve.com"
 DEFAULT_TOKEN_FILE = ".snabbit_token"
 NOW_AVAILABILITY_PATH = "/api/v2/schedules/now/availability"
+OPENING_HOUR = 6
 
 
 class SnabbitHTTPError(RuntimeError):
@@ -20,6 +21,29 @@ class SnabbitHTTPError(RuntimeError):
         self.status = status
         self.body = body
         super().__init__(f"HTTP {status}: {body[:1000]}")
+
+
+@dataclass
+class SnabbitAPIErrorSummary:
+    status: int
+    code: str | None
+    title: str | None
+    message: str | None
+    is_closed: bool = False
+
+    @property
+    def display_message(self) -> str:
+        if self.is_closed:
+            if self.message:
+                return f"CLOSED: {self.message}"
+            return "CLOSED: currently not serviceable"
+
+        parts = [part for part in (self.title, self.message) if part]
+        if parts:
+            return f"ERROR: {' - '.join(parts)}"
+        if self.code:
+            return f"ERROR: {self.code}"
+        return f"HTTP {self.status}"
 
 
 @dataclass
@@ -68,6 +92,39 @@ def decode_token_claims(token: str | None) -> dict[str, Any]:
 
 def token_customer_id(token: str | None) -> Any:
     return decode_token_claims(token).get("user_id")
+
+
+def next_open_time(now: datetime | None = None) -> datetime:
+    current = now or datetime.now()
+    opens_at = datetime.combine(current.date(), time(hour=OPENING_HOUR))
+    if current >= opens_at:
+        opens_at += timedelta(days=1)
+    return opens_at
+
+
+def seconds_until_open(now: datetime | None = None) -> float:
+    current = now or datetime.now()
+    return max(0.0, (next_open_time(current) - current).total_seconds())
+
+
+def parse_api_error(status: int, body: str) -> SnabbitAPIErrorSummary:
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return SnabbitAPIErrorSummary(status, None, None, body[:1000] or None)
+
+    errors = payload.get("errors") if isinstance(payload, dict) else None
+    first_error = errors[0] if isinstance(errors, list) and errors and isinstance(errors[0], dict) else {}
+    code = first_error.get("code")
+    title = first_error.get("title")
+    message = first_error.get("message")
+    return SnabbitAPIErrorSummary(
+        status=status,
+        code=str(code) if code is not None else None,
+        title=str(title) if title is not None else None,
+        message=str(message) if message is not None else None,
+        is_closed=code == "TIMING_NOT_SERVICEABLE",
+    )
 
 
 def find_auth_token(value: Any) -> str | None:
