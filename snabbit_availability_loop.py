@@ -21,6 +21,7 @@ from snabbit_api import (
     next_open_time,
     parse_api_error,
     seconds_until_open,
+    send_telegram_message,
     summarize_availability,
     token_customer_id,
 )
@@ -54,11 +55,20 @@ def build_payload(client: SnabbitClient, address_id: str, service_id: str) -> di
     )
 
 
-def print_check(data: Any, print_json: bool) -> None:
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] {summarize_availability(data)}", flush=True)
-    if print_json:
-        print(json.dumps(data, indent=2, sort_keys=True), flush=True)
+def notify_if_available(summary: str, last_summary: str | None) -> None:
+    if not summary.startswith("AVAILABLE:") or (last_summary and last_summary.startswith("AVAILABLE:")):
+        return
+
+    bot_token = env_value("TELEGRAM_BOT_TOKEN")
+    chat_id = env_value("TELEGRAM_CHAT_ID")
+    if not bot_token or not chat_id:
+        return
+
+    try:
+        send_telegram_message(bot_token, chat_id, f"Snabbit {summary}")
+    except Exception as exc:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{timestamp}] Telegram notification failed: {exc}", flush=True)
 
 
 def run() -> int:
@@ -73,10 +83,18 @@ def run() -> int:
 
     client = SnabbitClient(token=token)
     payload = build_payload(client, args.address_id, args.service_id)
+    last_summary: str | None = None
 
     while True:
         try:
-            print_check(client.now_availability(payload), args.print_json)
+            data = client.now_availability(payload)
+            summary = summarize_availability(data)
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{timestamp}] {summary}", flush=True)
+            notify_if_available(summary, last_summary)
+            last_summary = summary
+            if args.print_json:
+                print(json.dumps(data, indent=2, sort_keys=True), flush=True)
         except SnabbitHTTPError as exc:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             api_error = parse_api_error(exc.status, exc.body)
@@ -95,6 +113,7 @@ def run() -> int:
                 continue
 
             print(f"[{timestamp}] {api_error.display_message}", flush=True)
+            last_summary = api_error.display_message
             if args.once:
                 return 1
         except Exception as exc:

@@ -339,3 +339,23 @@ def summarize_availability(data: Any) -> str:
         return "UNAVAILABLE: no scheduled slots available"
 
     return "UNKNOWN: response did not match the known availability shapes"
+
+
+def send_telegram_message(bot_token: str, chat_id: str, text: str) -> None:
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    req = request.Request(
+        url=f"https://api.telegram.org/bot{bot_token}/sendMessage",
+        data=parse.urlencode(payload).encode("utf-8"),
+        headers={"content-type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=15) as response:
+            response.read()
+    except error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Telegram HTTP {exc.code}: {body[:500]}") from exc
