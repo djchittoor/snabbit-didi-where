@@ -62,7 +62,7 @@ def run() -> int:
     args = parse_args()
     token = env_value("SNABBIT_TOKEN") or load_token()
     if not token:
-        print(f"Missing token. Run snabbit_login_check.py with --save-token to create {DEFAULT_TOKEN_FILE}.", file=sys.stderr)
+        print(f"Missing token. Run ./snabbit_login.py to create {DEFAULT_TOKEN_FILE}.", file=sys.stderr)
         return 2
     if not args.address_id:
         print("Missing address ID. Run ./snabbit_list_addresses.py and pass --address-id.", file=sys.stderr)
